@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NISAR Indonesia — kerangka latihan</title>
+
+  <!-- ================================================================
+       KERANGKA LATIHAN. Panduan langkahnya: docs/latihan_web_kerangka.md
+       Kunci jawaban: index.html di folder yang sama. Jangan dibuka
+       sebelum mencoba sendiri; bandingkan SESUDAHNYA.
+
+       Cara kerja:
+       1. Buka berkas ini di browser (klik dua kali, atau seret ke Chrome).
+       2. Kerjakan TODO(kamu) urut dari nomor 0.
+       3. Simpan (Ctrl+S), lalu muat ulang browser (F5).
+       4. Kotak "Pemeriksa" di pojok kiri bawah memberi tahu langkah mana
+          yang sudah benar. Konsol (F12 -> Console) menunjuk baris yang galat.
+       ================================================================ -->
+
+  <!-- Leaflet: pustaka peta. Dari folder lib/, jadi tetap jalan tanpa CDN.
+       (Ubin petanya tetap butuh internet.) CSS dan JS WAJIB dua-duanya. -->
+  <link rel="stylesheet" href="lib/leaflet/leaflet.css">
+  <script src="lib/leaflet/leaflet.js"></script>
+
+  <!-- CSS sudah jadi. Nama kelasnya (.label, .legenda, .titik, .gambar,
+       .batang-baris, ...) adalah "kontrak": pakai nama yang sama di
+       JavaScript-mu, maka tampilannya otomatis rapi. -->
+  <style>
+    :root {
+      --bg: #f7f7f5; --teks: #1d1d1b; --redup: #6b6b66;
+      --berhasil: #1f7a4d; --negatif: #b4532a; --kartu: #ffffff; --garis: #e2e1dc;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #161615; --teks: #ecebe6; --redup: #9b9a94; --kartu: #222220; --garis: #3a3a37; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--teks); }
+    header { padding: 16px; }
+    header h1 { margin: 0 0 4px; font-size: 1.3rem; }
+    header p { margin: 0; color: var(--redup); }
+    main { display: grid; grid-template-columns: 1fr 360px; gap: 12px; padding: 0 16px 16px; }
+    #peta { height: 75vh; border-radius: 8px; background: var(--garis); }
+    #panel { background: var(--kartu); border-radius: 8px; padding: 16px; overflow-y: auto; max-height: 75vh; }
+    #panel h2 { margin: 8px 0; font-size: 1.15rem; }
+    .redup { color: var(--redup); font-size: .9rem; }
+    .label { display: inline-block; padding: 2px 8px; border-radius: 99px; color: #fff; font-size: .8rem; }
+    .berhasil { background: var(--berhasil); }
+    .negatif  { background: var(--negatif); }
+
+    /* Legenda di pojok peta (TODO 8) */
+    .legenda { background: var(--kartu); color: var(--teks); padding: 8px 10px; border-radius: 6px;
+               font-size: .85rem; line-height: 1.6; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+    .titik { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+
+    /* Gambar di panel (TODO 7) */
+    .gambar { margin: 14px 0 0; }
+    .gambar img { width: 100%; border-radius: 6px; display: block; cursor: zoom-in; }
+    .gambar figcaption { font-size: .82rem; color: var(--redup); margin-top: 4px; }
+    .jenis { font-size: .7rem; padding: 1px 6px; border-radius: 4px; margin-right: 4px;
+             text-transform: uppercase; letter-spacing: .03em; }
+    .jenis.radar { background: #2c5f8a; color: #fff; }
+    .jenis.foto  { background: var(--garis); color: var(--teks); }
+
+    /* Grafik batang tanpa pustaka (TODO 9) */
+    .batang-baris { display: grid; grid-template-columns: 110px 1fr 52px; gap: 6px;
+                    align-items: center; font-size: .85rem; margin: 4px 0; }
+    .batang-lajur { background: var(--garis); height: 12px; border-radius: 3px; }
+    .batang-isi { height: 12px; border-radius: 3px; }
+
+    @media (max-width: 760px) { main { grid-template-columns: 1fr; } #peta { height: 55vh; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Apa yang dilihat radar NISAR di Indonesia</h1>
+    <p>Tiga berhasil, tiga negatif terukur. Klik titik di peta.</p>
+  </header>
+
+  <main>
+    <div id="peta"></div>
+    <aside id="panel">
+      <p>Pilih satu lokasi di peta.</p>
+      <p class="redup">Hijau = sinyal terdeteksi dengan kontrol. Oranye = negatif terukur:
+        sinyalnya tidak lebih besar dari derau, dan itu juga hasil.</p>
+    </aside>
+  </main>
+
+  <script>
+    // ==================================================================
+    // 0. DATA — satu-satunya sumber kebenaran halaman ini.
+    //    Kode di bawah TIDAK boleh tahu ada berapa temuan atau apa namanya;
+    //    ia hanya tahu BENTUK satu temuan.
+    //
+    //    Kunci WAJIB : nama, lat, lon, status ("berhasil" | "negatif"),
+    //                  metode, angka
+    //    Kunci OPSIONAL: catatan, gambar (larik), grafik (objek)
+    // ==================================================================
+    const TEMUAN = [
+      {
+        nama: "Letusan Anak Krakatau",
+        lat: -6.102, lon: 105.423,
+        status: "berhasil",
+        metode: "Koherensi GUNW, jalur 010A, kontrol 3 pulau tetangga di bingkai yang sama",
+        angka: "Koherensi 0,7678 → 0,2391 saat letusan (−8,7 σ). Pulau tetangga hanya −1,1 s/d −1,5 σ.",
+        grafik: {
+          judul: "Simpangan dari kondisi normal (σ) saat letusan",
+          batang: [
+            { label: "Anak Krakatau", nilai: -8.7 },
+            { label: "Sertung",       nilai: -1.5 },
+            { label: "Rakata",        nilai: -1.2 },
+            { label: "Panjang",       nilai: -1.1 },
+          ],
+        },
+        gambar: [
+          { src: "gambar/radar_krakatau_deret.jpg", jenis: "radar",
+            judul: "Koherensi radar per 12 hari. Panel bertanda merah = letusan: " +
+                   "pulau berubah biru gelap (runtuh), pulau tetangga tetap." },
+          { src: "gambar/krakatau_2026-09-05_viirs_n20.jpg", jenis: "foto",
+            judul: "5 Sep 2026: awan letusan dari Anak Krakatau memanjang ke barat. " +
+                   "VIIRS NOAA-20, NASA Worldview." },
+          { src: "gambar/krakatau_2026-09-04_viirs_n20.jpg", jenis: "foto",
+            judul: "4 Sep 2026: gumpalan tipis ke barat daya. VIIRS NOAA-20, NASA Worldview." },
+        ],
+      },
+      {
+        nama: "Karhutla Kalimantan Barat",
+        lat: 0.529, lon: 109.006,
+        status: "berhasil",
+        metode: "Hamburan balik GCOV HV, rasio dB 24 Jun → 16 Sep, divalidasi titik panas FIRMS",
+        angka: "Penurunan ≥3 dB 9,2× lebih sering di titik panas (4,4%) dibanding seluruh bingkai (0,5%).",
+        catatan: "Titik = kelompok terpadat dari 179 titik panas FIRMS yang JUGA turun >3 dB di radar.",
+        gambar: [
+          { src: "gambar/radar_kalbar_hv.jpg", jenis: "radar",
+            judul: "Perubahan hamburan balik HV 24 Jun → 16 Sep. Merah = tajuk hilang (bekas bakar)." },
+          { src: "gambar/kalbar_2026-08-31_viirs_n20.jpg", jenis: "foto",
+            judul: "31 Agu 2026: gumpalan asap keluar dari titik api ke timur laut. VIIRS NOAA-20." },
+        ],
+      },
+      {
+        nama: "Amblesan Jakarta",
+        lat: -6.20, lon: 106.80,
+        status: "negatif",
+        metode: "Rantai 6 interferogram + koreksi ionosfer",
+        angka: "Sinyal 2–6 cm lawan derau 2,92 cm: 84 hari terlalu pendek untuk amblesan.",
+      },
+
+      // TODO(kamu) 0: tambahkan TIGA temuan lagi, bentuknya sama persis.
+      //
+      //   nama                                  lat     lon      status
+      //   Kekeringan El Niño (Kalimantan Tengah) -1.095  111.987  berhasil
+      //   Bendungan Cirata                       -6.70   107.37   negatif
+      //   Gempa Flores M7,7                      -9.065  120.695  negatif
+      //
+      //   metode / angka:
+      //   - El Niño : "Kelembapan tanah SME2, 41 tanggal Jun–Sep 2026"
+      //               "Kelembapan tanah Kalteng 0,360 → 0,237 (Kalbar 0,367 → 0,272)."
+      //   - Cirata  : "GUNW dua geometri (jalur menurun + menaik)"
+      //               "+3,54 sb di satu geometri, TIDAK terkonfirmasi di geometri kedua."
+      //   - Flores  : "Fasa dan koherensi GUNW, kontrol pra/ko/pasca-seismik"
+      //               "Koherensi rasio 0,96–0,98×: kerusakan 9 ha = 56 piksel dari 7,6 juta."
+      //               catatan: "Titik = pusat bingkai radar (di Selat Sumba), BUKAN pusat gempa."
+      //
+      //   Petunjuk: salin objek "Amblesan Jakarta" di atas, lalu ganti isinya.
+      //   Jebakan : lupa KOMA di antara dua objek -> seluruh <script> mati.
+      //             Konsol (F12) menunjuk barisnya.
+    ];
+
+    // Kamus warna: WARNA["berhasil"] -> hijau. Menggantikan if/else.
+    const WARNA = { berhasil: "#1f7a4d", negatif: "#b4532a" };
+
+    // Alamat ubin peta Esri. Perhatikan {z}/{y}/{x}: y DULU, beda dengan OSM.
+    // (OSM memblokir halaman file:// dengan 403, CARTO bertanda air. Lihat
+    //  panduan_web_nisar.md §8 no. 6.)
+    const UBIN_JALAN = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
+    const UBIN_CITRA = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+
+
+    // ==================================================================
+    // 1. PETA
+    // ==================================================================
+    // TODO(kamu) 1: buat peta di <div id="peta"> dan simpan di variabel
+    //   bernama `peta` (nama ini dipakai Pemeriksa, jangan diganti).
+    //   Petunjuk : L.map("...")  lalu  .setView([lintang, bujur], perbesaran)
+    //              Tengah Indonesia kira-kira [-2.5, 115], perbesaran 5.
+    //   Cek      : kotak abu-abu dengan tombol + / − muncul.
+
+    // TODO(kamu) 2: pasang lapisan ubin supaya petanya bergambar.
+    //   Petunjuk : L.tileLayer(UBIN_JALAN, { attribution: "Ubin &copy; Esri", maxZoom: 12 })
+    //              lalu .addTo(peta)
+    //   Cek      : peta Indonesia muncul dan bisa digeser.
+    //   Bonus    : buat juga lapisan UBIN_CITRA, lalu pasang tombol pilih lapisan
+    //              L.control.layers({ "Peta jalan": ..., "Citra satelit": ... }).addTo(peta)
+
+
+    // ==================================================================
+    // 2. PENANDA
+    // ==================================================================
+    // TODO(kamu) 3: gambar SATU titik dulu, untuk TEMUAN[0] saja.
+    //   Petunjuk : L.circleMarker([lat, lon], { radius: 9, color: ..., fillColor: ...,
+    //                                           fillOpacity: 0.8 }).addTo(peta)
+    //   Cek      : satu titik di Selat Sunda.
+    //   Jebakan  : Leaflet memakai [LINTANG, BUJUR]. Tertukar = titik di Samudra Hindia.
+
+    // TODO(kamu) 4: ubah TODO 3 menjadi perulangan untuk SEMUA temuan.
+    //   Petunjuk : for (const t of TEMUAN) { ... }
+    //              warna   : WARNA[t.status]
+    //              tooltip : .bindTooltip(t.nama)   (muncul saat kursor di atas titik)
+    //   Cek      : enam titik, tiga hijau tiga oranye.
+
+    // TODO(kamu) 5: saat titik diklik, panggil tampilkan(t).
+    //   Langkah aman: mula-mula .on("click", () => console.log(t.nama)),
+    //   pastikan nama tercetak di konsol, BARU ganti jadi tampilkan(t).
+    //   Jebakan : .on("click", tampilkan(t))  <- TANPA "() =>" fungsi itu langsung
+    //             jalan saat halaman dimuat, dan klik tidak melakukan apa-apa.
+
+
+    // ==================================================================
+    // 3. PANEL — fungsi-fungsi di bawah ini sudah ada "kulitnya";
+    //    isinya yang kamu tulis.
+    // ==================================================================
+
+    // TODO(kamu) 6: isi panel dengan data temuan t, lalu dekatkan peta.
+    //   Petunjuk :
+    //     const panel = document.getElementById("panel");
+    //     panel.innerHTML = `
+    //       <span class="label ${t.status}">${t.status}</span>
+    //       <h2>...</h2>
+    //       ... metode (kelas "redup"), angka (tebal: <strong>) ...
+    //     `;
+    //     peta.flyTo([t.lat, t.lon], 8);
+    //   Kunci OPSIONAL (catatan, gambar, grafik): pakai ternary
+    //     ${t.catatan ? `<p class="redup">${t.catatan}</p>` : ""}
+    //   Jebakan : tanpa ternary, temuan tanpa catatan menampilkan kata "undefined".
+    //   Nanti (TODO 7 & 9) tampilkanGambar() dan gambarGrafik() dipanggil dari sini.
+    function tampilkan(t) {
+
+    }
+
+    // TODO(kamu) 7: kembalikan HTML satu gambar + keterangannya.
+    //   Bentuk yang diharapkan:
+    //     <figure class="gambar">
+    //       <a href="(src)" target="_blank"><img src="(src)" alt="(judul)"></a>
+    //       <figcaption><span class="jenis (jenis)">(jenis)</span> (judul)</figcaption>
+    //     </figure>
+    //   Lalu di tampilkan():  ${t.gambar ? t.gambar.map(tampilkanGambar).join("") : ""}
+    //   .map() mengubah tiap gambar jadi teks HTML, .join("") menyambungnya.
+    function tampilkanGambar(g) {
+      return "";
+    }
+
+
+    // ==================================================================
+    // 4. LEGENDA
+    // ==================================================================
+    // TODO(kamu) 8: kotak legenda di pojok kanan bawah peta.
+    //   Petunjuk :
+    //     const legenda = L.control({ position: "bottomright" });
+    //     legenda.onAdd = () => {
+    //       const div = L.DomUtil.create("div", "legenda");
+    //       div.innerHTML = ...   // dua baris: <span class="titik" style="background:..."></span>berhasil<br>...
+    //       return div;
+    //     };
+    //     legenda.addTo(peta);
+    //   Ambil warnanya dari WARNA, jangan ditulis ulang. Kenapa? (Jawaban di
+    //   panduan_web_nisar.md §5.)
+
+
+    // ==================================================================
+    // 5. GRAFIK
+    // ==================================================================
+    // TODO(kamu) 9 (penantang): grafik batang dari <div> biasa.
+    //   Rumus    : lebar (%) = |nilai| / |nilai terbesar| × 100
+    //   Petunjuk : Math.abs(x), Math.max(...larik), g.batang.map(...)
+    //   Per batang:
+    //     <div class="batang-baris">
+    //       <span>(label)</span>
+    //       <div class="batang-lajur"><div class="batang-isi" style="width:(lebar)%; background:(warna)"></div></div>
+    //       <span>(nilai, 1 desimal: .toFixed(1)) σ</span>
+    //     </div>
+    //   Warnai batang pertama hijau, sisanya abu-abu (#9b9a94). Kenapa batang
+    //   pertama dibedakan? Itulah inti argumen "kontrol tetangga".
+    //   Lalu di tampilkan():  ${t.grafik ? gambarGrafik(t.grafik) : ""}
+    //   Cek      : Anak Krakatau 100%, Panjang ±12,6%.
+    function gambarGrafik(g) {
+      return "";
+    }
+  </script>
+
+  <!-- Pemeriksa otomatis. Tidak perlu dibaca atau diedit. -->
+  <script src="pemeriksa.js"></script>
+</body>
+</html>

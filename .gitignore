@@ -1,0 +1,64 @@
+# ============================================================
+# Kredensial — jangan pernah ikut ter-commit
+# ============================================================
+.netrc
+_netrc
+*.env
+.env*
+*token*
+*.pem
+*.key
+
+# ============================================================
+# Data mentah NISAR / hasil potongan (besar, ±540 MB total)
+# ============================================================
+*.h5
+*.nc
+*.npz
+*.npy
+*.tif
+*.tiff
+*.kml
+*.zip
+
+# Folder data per lokasi studi
+/data/
+/bendungan/
+/flores/
+/kalbar/
+/krakatau/
+/sme2/
+/sme2_155/
+
+# ============================================================
+# Repo terpisah (punya .git sendiri) — jangan di-nest
+# ============================================================
+/spaceapps/
+
+# ============================================================
+# Output / log skrip
+# ============================================================
+*.log
+bendungan_cari.txt
+
+# Gambar hasil di root (hapus tanda # kalau tidak mau ikut di-commit)
+/*.png
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# ============================================================
+# Editor & OS
+# ============================================================
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Radar NISAR di Indonesia</title>
+
+  <!-- SEMUA dari folder lib/, tidak ada yang dari internet. Disiapkan oleh
+       siapkan_luring.py. Inilah yang membuat halaman tetap jalan di expo
+       walau Wi-Fi mati. -->
+  <link rel="stylesheet" href="lib/leaflet/leaflet.css">
+  <script src="lib/leaflet/leaflet.js"></script>
+  <script src="lib/chart.umd.min.js"></script>
+  <!-- Data radar yang sudah dipanggang oleh bangun_data.py: window.NISAR -->
+  <script src="data/data.js"></script>
+
+  <style>
+    :root {
+      --bg: #f7f7f5; --teks: #1d1d1b; --redup: #6b6b66; --kartu: #ffffff;
+      --garis: #e2e1dc; --aksen: #2c5f8a; --berhasil: #1f7a4d; --negatif: #b4532a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #161615; --teks: #ecebe6; --redup: #a3a29c; --kartu: #222220;
+              --garis: #3a3a37; --aksen: #6fa3d1; }
+    }
+    /* Ukuran huruf ikut lebar layar: 15px di laptop kecil, sampai 22px di TV.
+       Semua ukuran lain memakai rem, jadi ikut membesar bersama. */
+    html { font-size: clamp(15px, 1.05vw, 22px); }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--teks); }
+    header { padding: .9rem 1rem .4rem; }
+    header h1 { margin: 0; font-size: 1.45rem; }
+    header p { margin: .25rem 0 0; color: var(--redup); }
+
+    nav { display: flex; gap: .4rem; flex-wrap: wrap; padding: .4rem 1rem .7rem; }
+    nav button { border: 1px solid var(--garis); background: var(--kartu); color: var(--teks);
+                 padding: .45rem .9rem; border-radius: 99px; cursor: pointer; font-size: .95rem; }
+    nav button.aktif { background: var(--aksen); color: #fff; border-color: var(--aksen); }
+
+    main { display: grid; grid-template-columns: 1fr 26rem; gap: .8rem; padding: 0 1rem 1rem; }
+    /* Isi seluruh tinggi layar dikurangi judul + tab (~10,5rem). Dengan 74vh,
+       sepertiga bawah layar kosong dan grafik di panel terpotong. */
+    #peta { height: calc(100vh - 10.5rem); min-height: 22rem; border-radius: 8px; }
+    #panel { background: var(--kartu); border-radius: 8px; padding: .9rem 1rem;
+             overflow-y: auto; max-height: calc(100vh - 10.5rem); }
+    #panel h2 { margin: 0 0 .4rem; font-size: 1.2rem; }
+    #narasi { line-height: 1.45; font-size: .95rem; }
+    .redup { color: var(--redup); font-size: .88rem; }
+    .kotak { border-top: 1px solid var(--garis); margin-top: .8rem; padding-top: .7rem; }
+    details { margin-top: .6rem; font-size: .88rem; color: var(--redup); }
+    details summary { cursor: pointer; color: var(--aksen); }
+
+    .waktu { display: grid; grid-template-columns: auto 1fr; gap: .5rem; align-items: center; }
+    .waktu button { width: 2.4rem; height: 2rem; border-radius: 6px; border: 1px solid var(--garis);
+                    background: var(--kartu); color: var(--teks); cursor: pointer; font-size: 1rem; }
+    input[type=range] { width: 100%; accent-color: var(--aksen); }
+    #label-tanggal { font-weight: 600; margin: .3rem 0 .15rem; }
+    .skala { height: .75rem; border-radius: 3px; margin-top: .25rem; }
+    .skala-angka { display: flex; justify-content: space-between; font-size: .8rem; color: var(--redup); }
+    #grafik-wadah { height: 10rem; }
+
+    .legenda { background: var(--kartu); color: var(--teks); padding: .5rem .65rem; border-radius: 6px;
+               font-size: .85rem; line-height: 1.6; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+    .titik { display: inline-block; width: .65rem; height: .65rem; border-radius: 50%; margin-right: .4rem; }
+
+    /* Pita mode pameran */
+    /* Di pojok kanan ATAS: di bawah, pita menutupi atribusi peta, padahal
+       atribusi wajib terlihat menurut lisensi CC BY-NC-SA citranya. */
+    #pita { display: none; position: fixed; right: 1rem; top: .9rem;
+            background: var(--aksen); color: #fff; padding: .55rem 1.1rem; border-radius: 99px;
+            font-size: 1rem; z-index: 2000; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+    body.pameran #pita { display: block; }
+
+    @media (max-width: 860px) { main { grid-template-columns: 1fr; } #peta { height: 55vh; }
+                                #panel { max-height: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Apa yang dilihat radar NISAR di Indonesia</h1>
+    <p>Satelit radar NASA–ISRO, Juni–September 2026. Pilih cerita, geser waktu, klik peta.</p>
+  </header>
+
+  <nav id="tab"></nav>
+
+  <main>
+    <div id="peta"></div>
+    <aside id="panel">
+      <h2 id="judul"></h2>
+      <div id="narasi"></div>
+      <div id="kontrol" class="kotak">
+        <div id="label-tanggal"></div>
+        <div class="waktu">
+          <button id="putar" title="Putar / jeda">▶</button>
+          <input id="penggeser" type="range" min="0" value="0" step="1">
+        </div>
+        <div class="redup" style="margin-top:.5rem">Kepekatan lapisan</div>
+        <input id="kepekatan" type="range" min="0" max="100" value="85">
+        <div class="redup" style="margin-top:.4rem" id="nama-skala"></div>
+        <div id="skala" class="skala"></div>
+        <div class="skala-angka"><span id="skala-min"></span><span id="skala-maks"></span></div>
+      </div>
+
+      <div class="kotak" id="kotak-grafik">
+        <div id="info-klik" class="redup">Klik di dalam lapisan berwarna untuk melihat perubahannya dari waktu ke waktu.</div>
+        <div id="grafik-wadah"><canvas id="grafik"></canvas></div>
+      </div>
+
+      <!-- Penjelasan tambahan di PALING BAWAH: di layar expo grafik harus terlihat
+           tanpa digulir, karena pengunjung jarang menggulir panel. -->
+      <details>
+        <summary>Apa itu radar NISAR?</summary>
+        NISAR memancarkan gelombang radio ke bumi lalu menangkap pantulannya. Tidak
+        seperti kamera, radar <b>menembus awan dan asap</b> dan bekerja siang maupun
+        malam. Dengan membandingkan pantulan dari lintasan yang berbeda, kita bisa
+        melihat permukaan mana yang <b>berubah</b>.
+      </details>
+      <details id="detail-teknis">
+        <summary>Rincian teknis</summary>
+        <div id="teknis"></div>
+      </details>
+
+    </aside>
+  </main>
+
+  <div id="pita">Mode pameran · sentuh layar untuk menjelajah sendiri</div>
+
+<script>
+// =====================================================================
+// 1. CERITA — teks awam di `narasi`, rincian ilmiah di `teknis`.
+//    `contoh` = titik yang diklik otomatis saat mode pameran.
+//    `skala` = nama besaran + arti ujung-ujung skala dalam bahasa awam.
+// =====================================================================
+const CERITA = [
+  {
+    id: "krakatau", tab: "Letusan Krakatau", lapisan: ["krakatau"],
+    pusat: [-6.10, 105.42], zoom: 12, mulai: 4, contoh: [-6.102, 105.423],
+    skala: { nama: "Kestabilan permukaan", min: "berubah total", maks: "tidak berubah" },
+    narasi: `Anak Krakatau meletus pada awal September 2026. Warna menunjukkan
+      seberapa <b>stabil</b> permukaan pulau di antara dua lintasan satelit:
+      <b>kuning = stabil</b>, <b>ungu tua = berubah total</b>. Saat letusan, hampir
+      seluruh pulau berubah gelap, sementara tiga pulau tetangganya tetap seperti
+      biasa. Itulah buktinya bahwa perubahan itu karena letusan, bukan karena
+      gangguan pada satelit. <b>Coba klik kawahnya, lalu klik pulau besar di
+      selatan.</b>`,
+    teknis: `Koherensi interferometrik GUNW, jalur 010A bingkai 175, selang 12 hari.
+      Anak Krakatau 0,7678 ± 0,0605 → 0,2391 saat letusan (−8,7 σ terhadap dasarnya).
+      Kontrol di bingkai yang sama: Sertung −1,5 σ, Panjang −1,1 σ, Rakata −1,2 σ.
+      Topeng darat: koherensi rata-rata pra1–pra3 > 0,35.`,
+  },
+  {
+    id: "elnino", tab: "El Niño: tanah mengering", lapisan: ["sme2_kalteng", "sme2_kalbar"],
+    pusat: [-0.1, 110.4], zoom: 7, mulai: 0, contoh: [-1.10, 112.0],
+    skala: { nama: "Kelembapan tanah", min: "kering", maks: "basah" },
+    narasi: `Tahun 2026 adalah tahun El Niño, yang membawa kemarau panjang ke
+      Indonesia. Radar NISAR bisa mengukur <b>seberapa basah tanah</b>. Tekan ▶ dan
+      lihat Kalimantan berubah dari <b>hijau-biru (basah)</b> menjadi <b>coklat
+      (kering)</b> dalam tiga bulan. Kelembapan tanah di Kalimantan Tengah turun
+      sekitar <b>sepertiga</b>. Tanah gambut yang kering inilah yang mudah terbakar.`,
+    teknis: `Produk SME2 (kelembapan tanah, 200 m), ~12 hari sekali. Rata-rata bingkai
+      Kalteng 0,359 → 0,239 m³/m³; Kalbar 0,367 → ~0,275. Badan air (fraksi air > 0,5)
+      disembunyikan. Batas klaim: ini kesamaan waktu dengan El Niño, bukan bukti
+      bahwa El Niño satu-satunya penyebab.`,
+  },
+  {
+    id: "kalbar", tab: "Bekas kebakaran Kalbar", lapisan: ["kalbar_hv"],
+    pusat: [0.75, 109.2], zoom: 8, mulai: 0, contoh: [0.529, 109.006],
+    skala: { nama: "Perubahan pantulan pepohonan", min: "pohon hilang", maks: "bertambah" },
+    narasi: `Kebakaran hutan dan lahan di Kalimantan Barat, puncaknya akhir Agustus
+      2026. Radar ini peka terhadap <b>tajuk pohon</b>. Kalau pohon terbakar, pantulannya
+      melemah. <b>Merah = pohon hilang</b> antara Juni dan September. Kami
+      mencocokkannya dengan titik api dari satelit lain (FIRMS): di lokasi titik api,
+      penurunan kuat <b>9× lebih sering</b> dibanding tempat lain.`,
+    teknis: `Rasio hamburan balik GCOV HV (polarisasi silang), 24 Jun → 16 Sep. Dari
+      11.338 titik panas VIIRS, penurunan ≥ 3 dB terjadi di 4,4% (di antara piksel sah)
+      lawan 0,5% seluruh bingkai: pengayaan 9,2×. Laut disembunyikan dengan ambang HV
+      pra-kebakaran −20 dB.`,
+  },
+  {
+    id: "semua", tab: "Semua temuan", lapisan: [],
+    pusat: [-2.5, 115], zoom: 5, mulai: 0,
+    narasi: `Kami menguji enam peristiwa. <b>Tiga berhasil</b> dilihat radar (hijau).
+      <b>Tiga tidak</b> (oranye), dan kami tunjukkan juga, karena itu sama pentingnya:
+      radar unggul untuk perubahan <b>besar dan luas</b> seperti letusan atau
+      kebakaran, tapi tidak bisa melihat perubahan <b>kecil dan tersebar</b> seperti
+      rumah yang runtuh. Klik titiknya.`,
+    teknis: `Negatif terukur: Jakarta (sinyal amblesan 2–6 cm lawan derau 2,92 cm dalam
+      84 hari), Bendungan Cirata (+3,54 sb di satu geometri, tidak terkonfirmasi di
+      geometri kedua), Flores (kerusakan 9 ha = 56 piksel dari 7,6 juta).`,
+  },
+];
+
+const TITIK = [
+  { nama: "Letusan Anak Krakatau", lat: -6.102, lon: 105.423, status: "berhasil", cerita: "krakatau",
+    teks: "Permukaan pulau berubah total saat letusan; pulau tetangga tidak." },
+  { nama: "Kebakaran Kalimantan Barat", lat: 0.529, lon: 109.006, status: "berhasil", cerita: "kalbar",
+    teks: "Hilangnya pohon terlihat, cocok dengan titik api dari satelit lain." },
+  { nama: "Kekeringan El Niño", lat: -1.095, lon: 111.987, status: "berhasil", cerita: "elnino",
+    teks: "Kelembapan tanah turun sekitar sepertiga dalam tiga bulan." },
+  { nama: "Amblesan Jakarta", lat: -6.20, lon: 106.80, status: "negatif",
+    teks: "Tanah Jakarta turun beberapa cm per tahun, tapi 3 bulan data terlalu singkat untuk melihatnya." },
+  { nama: "Bendungan Cirata", lat: -6.70, lon: 107.37, status: "negatif",
+    teks: "Sempat terlihat bergerak dari satu arah satelit, tapi tidak dari arah lain: alarm palsu yang berhasil kami tangkap." },
+  { nama: "Gempa Flores M7,7", lat: -9.065, lon: 120.695, status: "negatif",
+    teks: "Kerusakannya terlalu kecil dan tersebar untuk resolusi radar. (Titik = pusat area pengamatan.)" },
+];
+
+// Warna skala = peta warna matplotlib yang dipakai bangun_data.py.
+// HARUS sama, kalau tidak legenda berbohong.
+const GRADASI = {
+  viridis: ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"],
+  BrBG:    ["#543005", "#bf812d", "#f5f5f5", "#80cdc1", "#003c30"],
+  RdYlGn:  ["#a50026", "#f46d43", "#ffffbf", "#a6d96a", "#006837"],
+};
+const WARNA = { berhasil: "#1f7a4d", negatif: "#b4532a" };
+
+// =====================================================================
+// 2. KEADAAN
+// =====================================================================
+const keadaan = { cerita: null, indeks: 0, overlay: [], titikKlik: null, pemutar: null };
+
+// =====================================================================
+// 3. PETA DASAR — citra lokal di ATAS, versi daring di BAWAH
+// =====================================================================
+const peta = L.map("peta", { minZoom: 4, maxZoom: 14 }).setView([-2.5, 115], 5);
+
+const EOX = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2024_3857/default/g/{z}/{y}/{x}.jpg";
+const ATRIBUSI = '<a href="https://s2maps.eu">Sentinel-2 cloudless</a> oleh EOX IT Services ' +
+                 '(data Copernicus Sentinel 2024 yang dimodifikasi), CC BY-NC-SA 4.0';
+// Dua lapisan citra yang SAMA, ditumpuk. Yang lokal di atas: kalau ubinnya
+// ada di lib/ubin, itu yang tampil. Kalau tidak ada (pengunjung memperbesar
+// melampaui yang disiapkan), ubin lokal gagal dan menjadi transparan, lalu
+// lapisan daring di bawahnya terlihat -- selama ada internet. Tanpa internet,
+// area itu kosong, tapi seluruh wilayah cerita sudah tersedia lokal.
+const citraDaring = L.tileLayer(EOX, { attribution: ATRIBUSI, maxZoom: 14 });
+const citraLokal = L.tileLayer("lib/ubin/{z}/{y}/{x}.jpg", { maxZoom: 14 });
+const citra = L.layerGroup([citraDaring, citraLokal]).addTo(peta);
+const jalan = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+  { attribution: "Ubin &copy; Esri", maxZoom: 14 });
+L.control.layers({ "Citra satelit": citra, "Peta jalan (perlu internet)": jalan }).addTo(peta);
+
+const grupTitik = L.layerGroup();
+for (const t of TITIK) {
+  L.circleMarker([t.lat, t.lon], { radius: 10, color: "#fff", weight: 2,
+                                   fillColor: WARNA[t.status], fillOpacity: 0.95 })
+    .bindPopup(`<b>${t.nama}</b><br>${t.teks}` +
+               (t.cerita ? `<br><a href="#" data-cerita="${t.cerita}">lihat ceritanya →</a>` : ""))
+    .addTo(grupTitik);
+}
+peta.on("popupopen", (e) => {
+  const a = e.popup.getElement().querySelector("a[data-cerita]");
+  if (a) a.onclick = (ev) => { ev.preventDefault(); pilihCerita(a.dataset.cerita); };
+});
+const legenda = L.control({ position: "bottomright" });
+legenda.onAdd = () => {
+  const d = L.DomUtil.create("div", "legenda");
+  d.innerHTML = `<span class="titik" style="background:${WARNA.berhasil}"></span>terlihat radar<br>
+                 <span class="titik" style="background:${WARNA.negatif}"></span>tidak terlihat radar`;
+  return d;
+};
+const penandaKlik = L.circleMarker([0, 0], { radius: 7, color: "#fff", weight: 3, fillOpacity: 0 });
+
+// =====================================================================
+// 4. GRAFIK
+// =====================================================================
+const grafik = new Chart(document.getElementById("grafik"), {
+  type: "line",
+  data: { labels: [], datasets: [] },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: { legend: { display: false } },
+    scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } } },
+  },
+});
+
+// =====================================================================
+// 5. FUNGSI
+// =====================================================================
+function nilaiDi(kunci, i, lat, lon) {
+  const L_ = window.NISAR[kunci];
+  const [s, w, n, e] = L_.batas;
+  if (lat < s || lat > n || lon < w || lon > e) return null;
+  const g = L_.grid[i];
+  const baris = Math.min(g.length - 1, Math.floor((n - lat) / (n - s) * g.length));
+  const kolom = Math.min(g[0].length - 1, Math.floor((lon - w) / (e - w) * g[0].length));
+  return g[baris][kolom];
+}
+
+function jumlahTanggal(c) {
+  return c.lapisan.length ? window.NISAR[c.lapisan[0]].tanggal.length : 0;
+}
+
+function pilihCerita(id) {
+  hentikanPutar();
+  const c = CERITA.find((x) => x.id === id);
+  keadaan.cerita = c;
+  keadaan.titikKlik = null;
+  penandaKlik.remove();
+
+  for (const b of document.querySelectorAll("nav button"))
+    b.classList.toggle("aktif", b.dataset.id === id);
+  document.getElementById("judul").textContent = c.tab;
+  document.getElementById("narasi").innerHTML = c.narasi;
+  document.getElementById("teknis").innerHTML = c.teknis;
+
+  const n = jumlahTanggal(c);
+  document.getElementById("kontrol").style.display = n ? "" : "none";
+  document.getElementById("kotak-grafik").style.display = n ? "" : "none";
+  if (n) { grupTitik.remove(); legenda.remove(); }
+  else { grupTitik.addTo(peta); legenda.addTo(peta); }
+
+  if (n) {
+    const p = document.getElementById("penggeser");
+    p.max = n - 1;
+    document.querySelector(".waktu").style.display = n === 1 ? "none" : "";
+    document.getElementById("grafik-wadah").style.display = n === 1 ? "none" : "";
+    tampilkanSkala(c, window.NISAR[c.lapisan[0]]);
+  }
+  keadaan.indeks = n ? c.mulai : 0;
+  gambarUlangLapisan();
+  kosongkanGrafik();
+  peta.flyTo(c.pusat, c.zoom, { duration: 0.8 });
+}
+
+function gambarUlangLapisan() {
+  for (const o of keadaan.overlay) o.remove();
+  keadaan.overlay = [];
+  const c = keadaan.cerita;
+  if (!c.lapisan.length) return;
+  const i = keadaan.indeks;
+  const kepekatan = document.getElementById("kepekatan").value / 100;
+  for (const kunci of c.lapisan) {
+    const L_ = window.NISAR[kunci];
+    const [s, w, n, e] = L_.batas;
+    keadaan.overlay.push(L.imageOverlay(`data/${L_.lapisan[i]}`, [[s, w], [n, e]],
+                                        { opacity: kepekatan }).addTo(peta));
+  }
+  document.getElementById("penggeser").value = i;
+  document.getElementById("label-tanggal").textContent =
+    c.lapisan.map((k) => window.NISAR[k].tanggal[i]).filter((v, j, a) => a.indexOf(v) === j).join("  ·  ");
+  perbaruiGrafik();
+}
+
+function tampilkanSkala(c, L_) {
+  document.getElementById("skala").style.background =
+    `linear-gradient(to right, ${GRADASI[L_.skala.cmap].join(", ")})`;
+  document.getElementById("skala-min").textContent = c.skala.min;
+  document.getElementById("skala-maks").textContent = c.skala.maks;
+  document.getElementById("nama-skala").textContent = c.skala.nama;
+}
+
+function kosongkanGrafik() {
+  grafik.data.labels = [];
+  grafik.data.datasets = [];
+  grafik.update();
+  document.getElementById("info-klik").textContent =
+    "Klik di dalam lapisan berwarna untuk melihat perubahannya dari waktu ke waktu.";
+}
+
+function perbaruiGrafik() {
+  const c = keadaan.cerita, t = keadaan.titikKlik;
+  if (!t || !c.lapisan.length) return;
+  const kunci = c.lapisan.find((k) =>
+    window.NISAR[k].grid.some((_, i) => nilaiDi(k, i, t.lat, t.lon) !== null));
+  const info = document.getElementById("info-klik");
+  if (!kunci) { info.textContent = "Titik ini di luar data (laut, badan air, atau di luar area pengamatan)."; return; }
+
+  const L_ = window.NISAR[kunci];
+  const nilai = L_.tanggal.map((_, i) => nilaiDi(kunci, i, t.lat, t.lon));
+  const [, w, , e] = L_.batas;
+  const km = ((e - w) * 111.32 * Math.cos(t.lat * Math.PI / 180)) / L_.grid[0].length;
+  info.innerHTML = `<b>${c.skala.nama}</b> di titik yang diklik` +
+    (nilai.length === 1 ? `: <b>${nilai[0] ?? "tak ada data"} ${L_.satuan}</b>` : "") +
+    `<br><span style="font-size:.8rem">rata-rata area ~${km.toFixed(1)} km; ` +
+    `gambar di peta lebih rinci daripada angka ini</span>`;
+  grafik.data.labels = L_.tanggal;
+  grafik.data.datasets = [{
+    label: c.skala.nama, data: nilai, spanGaps: false, tension: 0.2,
+    borderColor: getComputedStyle(document.documentElement).getPropertyValue("--aksen").trim(),
+    pointRadius: nilai.map((_, i) => (i === keadaan.indeks ? 7 : 3)),
+  }];
+  grafik.update();
+}
+
+function klikDi(lat, lon) {
+  keadaan.titikKlik = { lat, lon };
+  penandaKlik.setLatLng([lat, lon]).addTo(peta);
+  perbaruiGrafik();
+}
+
+function putar() {
+  if (keadaan.pemutar) return hentikanPutar();
+  document.getElementById("putar").textContent = "⏸";
+  keadaan.pemutar = setInterval(() => {
+    keadaan.indeks = (keadaan.indeks + 1) % jumlahTanggal(keadaan.cerita);
+    gambarUlangLapisan();
+  }, 1200);
+}
+
+function hentikanPutar() {
+  clearInterval(keadaan.pemutar);
+  keadaan.pemutar = null;
+  document.getElementById("putar").textContent = "▶";
+}
+
+// =====================================================================
+// 6. MODE PAMERAN — berkeliling sendiri kalau tak ada yang menyentuh
+// =====================================================================
+const DIAM_MS = 30000;          // 30 detik tanpa sentuhan -> mode pameran
+const LAMA_CERITA_MS = 16000;   // lama tiap cerita di mode pameran
+const pameran = { aktif: false, pewaktuDiam: null, pewaktuCerita: null, urutan: 0 };
+
+function mulaiPameran() {
+  pameran.aktif = true;
+  document.body.classList.add("pameran");
+  tampilkanCeritaPameran();
+}
+
+function tampilkanCeritaPameran() {
+  const c = CERITA[pameran.urutan % CERITA.length];
+  pameran.urutan++;
+  pilihCerita(c.id);
+  // Tunggu animasi terbang peta selesai, baru klik contoh dan putar waktu.
+  setTimeout(() => {
+    if (!pameran.aktif) return;
+    if (c.contoh) klikDi(c.contoh[0], c.contoh[1]);
+    if (jumlahTanggal(c) > 1) { keadaan.indeks = 0; gambarUlangLapisan(); putar(); }
+  }, 1200);
+  pameran.pewaktuCerita = setTimeout(tampilkanCeritaPameran, LAMA_CERITA_MS);
+}
+
+function hentikanPameran() {
+  pameran.aktif = false;
+  document.body.classList.remove("pameran");
+  clearTimeout(pameran.pewaktuCerita);
+  hentikanPutar();
+}
+
+// Setiap sentuhan/klik/tombol/gulir: hentikan pameran, mulai hitung diam dari nol.
+function adaAktivitas() {
+  if (pameran.aktif) hentikanPameran();
+  clearTimeout(pameran.pewaktuDiam);
+  pameran.pewaktuDiam = setTimeout(mulaiPameran, DIAM_MS);
+}
+for (const jenis of ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"])
+  window.addEventListener(jenis, adaAktivitas, { passive: true });
+
+// =====================================================================
+// 7. SAMBUNGKAN KEJADIAN
+// =====================================================================
+for (const c of CERITA) {
+  const b = document.createElement("button");
+  b.textContent = c.tab;
+  b.dataset.id = c.id;
+  b.onclick = () => pilihCerita(c.id);
+  document.getElementById("tab").appendChild(b);
+}
+document.getElementById("penggeser").oninput = (e) => {
+  hentikanPutar();
+  keadaan.indeks = Number(e.target.value);
+  gambarUlangLapisan();
+};
+document.getElementById("kepekatan").oninput = (e) => {
+  for (const o of keadaan.overlay) o.setOpacity(e.target.value / 100);
+};
+document.getElementById("putar").onclick = putar;
+peta.on("click", (e) => {
+  if (!keadaan.cerita.lapisan.length) return;
+  klikDi(e.latlng.lat, e.latlng.lng);
+});
+
+// Mulai
+if (!window.NISAR) {
+  document.getElementById("narasi").innerHTML =
+    "<b>data/data.js tidak termuat.</b> Jalankan dulu: <code>python latihan_web/bangun_data.py</code> dari folder nisar/.";
+} else {
+  pilihCerita("krakatau");
+  // Alamat berakhiran ?pameran -> langsung mode pameran (untuk dibuka di stan).
+  if (new URLSearchParams(location.search).has("pameran")) mulaiPameran();
+  else adaAktivitas();
+}
+</script>
+</body>
+</html>
